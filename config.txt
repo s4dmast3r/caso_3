@@ -1,0 +1,7 @@
+# Sistema IoT - Configuracion
+numSensores=3
+numEventosBase=8
+numClasificadores=2
+numServidores=3
+capacidadClasificacion=10
+capacidadConsolidacion=10
