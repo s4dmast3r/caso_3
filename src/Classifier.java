@@ -1,67 +1,61 @@
-import java.util.Map;
+import java.util.List;
 import java.util.concurrent.BrokenBarrierException;
 import java.util.concurrent.CyclicBarrier;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public class Classifier extends Thread {
     private final int classifierId;
-    private final EventQueue inputQueue;
-    private final Map<Integer, BlockingMailbox<ClassifiedEvent>> consolidationQueues;
+    private final LimitedMailbox<Event> classificationMailbox;
+    private final List<LimitedMailbox<Event>> serverMailboxes;
     private final CyclicBarrier terminationBarrier;
-    private final AtomicInteger classifiersTerminated;
-    private final int totalClassifiers;
-    private final int numServers;
+    private final ClassifierTerminationState terminationState;
+
+    private int sentToServersCount;
 
     public Classifier(
         int classifierId,
-        EventQueue inputQueue,
-        Map<Integer, BlockingMailbox<ClassifiedEvent>> consolidationQueues,
+        LimitedMailbox<Event> classificationMailbox,
+        List<LimitedMailbox<Event>> serverMailboxes,
         CyclicBarrier terminationBarrier,
-        AtomicInteger classifiersTerminated,
-        int totalClassifiers,
-        int numServers
+        ClassifierTerminationState terminationState
     ) {
         super("Classifier-" + classifierId);
         this.classifierId = classifierId;
-        this.inputQueue = inputQueue;
-        this.consolidationQueues = consolidationQueues;
+        this.classificationMailbox = classificationMailbox;
+        this.serverMailboxes = serverMailboxes;
         this.terminationBarrier = terminationBarrier;
-        this.classifiersTerminated = classifiersTerminated;
-        this.totalClassifiers = totalClassifiers;
-        this.numServers = numServers;
+        this.terminationState = terminationState;
     }
 
     @Override
     public void run() {
         try {
-            System.out.printf("[%s] Iniciando clasificacion.%n", getName());
+            System.out.printf("[%s] Inicio. Leyendo de %s.%n", getName(), classificationMailbox.getName());
 
             while (true) {
-                Event event = inputQueue.take();
+                // Espera semi-activa: el buzon de clasificacion es limitado.
+                Event event = classificationMailbox.takeSemiActive();
 
-                if (event.isShutdownSignal()) {
-                    System.out.printf("[%s] Evento de fin recibido.%n", getName());
-                    try {
-                        terminationBarrier.await();
-                        int terminated = classifiersTerminated.incrementAndGet();
-                        System.out.printf("[%s] Paso barrera. Terminados=%d.%n", getName(), terminated);
-
-                        if (terminated == totalClassifiers) {
-                            System.out.printf("[%s] Soy el ultimo. Enviando fin a %d servidores.%n", getName(), numServers);
-                            for (int i = 1; i <= numServers; i++) {
-                                consolidationQueues.get(i).put(ClassifiedEvent.shutdownSignal());
-                            }
-                        }
-                    } catch (BrokenBarrierException e) {
-                        Thread.currentThread().interrupt();
-                    }
+                if (event.isFinishSignal()) {
+                    handleFinishSignal(event);
                     break;
                 }
 
-                ClassifiedEvent classifiedEvent = classifyEvent(event);
-                int serverId = event.getTargetServerId();
-                consolidationQueues.get(serverId).put(classifiedEvent);
-                System.out.printf("[%s] Evento clasificado enviado a servidor %d: %s%n", getName(), serverId, classifiedEvent);
+                int targetServerId = event.getTargetServerId();
+                LimitedMailbox<Event> targetMailbox = serverMailboxes.get(targetServerId - 1);
+                String typeLabel = identifyType(event);
+
+                // Espera semi-activa: cada buzon de consolidacion esta limitado por tam2.
+                targetMailbox.putSemiActive(event);
+                sentToServersCount++;
+
+                System.out.printf(
+                    "[%s] %s identificado como %s. Enviado a servidor %d (%s).%n",
+                    getName(),
+                    event.getEventId(),
+                    typeLabel,
+                    targetServerId,
+                    targetMailbox.getName()
+                );
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -69,31 +63,34 @@ public class Classifier extends Thread {
         }
     }
 
-    private ClassifiedEvent classifyEvent(Event event) {
-        String category;
-        String destination;
+    private String identifyType(Event event) {
+        return "TYPE_" + event.getEventType();
+    }
 
-        switch (event.getType()) {
-            case TEMPERATURE:
-            case HUMIDITY:
-            case PRESSURE:
-                category = "ENVIRONMENTAL";
-                destination = "CONSOLIDATION_CLUSTER";
-                break;
-            case MOTION:
-                category = "SECURITY";
-                destination = "REAL_TIME_DASHBOARD";
-                break;
-            case SMOKE:
-                category = "SAFETY";
-                destination = "EMERGENCY_DASHBOARD";
-                break;
-            default:
-                category = "UNKNOWN";
-                destination = "BACKLOG";
-                break;
+    private void handleFinishSignal(Event event) throws InterruptedException {
+        boolean lastClassifier = terminationState.markTerminatedAndIsLast(classifierId);
+        System.out.printf("[%s] Evento de fin recibido (%s). Esperando barrera.%n", getName(), event.getFinishSource());
+
+        try {
+            terminationBarrier.await();
+        } catch (BrokenBarrierException e) {
+            InterruptedException interrupted = new InterruptedException("Barrera de clasificadores rota.");
+            interrupted.initCause(e);
+            throw interrupted;
         }
 
-        return new ClassifiedEvent(event, category, destination);
+        if (lastClassifier) {
+            System.out.printf("[%s] Ultimo clasificador. Enviando fin a %d servidores.%n", getName(), serverMailboxes.size());
+            for (int i = 0; i < serverMailboxes.size(); i++) {
+                LimitedMailbox<Event> serverMailbox = serverMailboxes.get(i);
+                serverMailbox.putSemiActive(Event.finishSignal("CLASSIFIERS_A_SERVER_" + (i + 1)));
+            }
+        }
+
+        System.out.printf("[%s] Fin. Eventos enviados a servidores=%d.%n", getName(), sentToServersCount);
+    }
+
+    public int getSentToServersCount() {
+        return sentToServersCount;
     }
 }

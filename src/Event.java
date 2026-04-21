@@ -1,40 +1,37 @@
 public class Event {
     private final String eventId;
     private final int sensorId;
-    private final EventType type;
-    private final EventPriority priority;
-    private final double value;
-    private final long timestamp;
-    private int targetServerId;
-    private boolean shutdownSignal;
+    private final int sequence;
+    private final int eventType;
+    private final long createdAt;
+    private final boolean finishSignal;
+    private final String finishSource;
 
-    public Event(
+    private Event(
         String eventId,
         int sensorId,
-        EventType type,
-        EventPriority priority,
-        double value,
-        long timestamp
+        int sequence,
+        int eventType,
+        long createdAt,
+        boolean finishSignal,
+        String finishSource
     ) {
         this.eventId = eventId;
         this.sensorId = sensorId;
-        this.type = type;
-        this.priority = priority;
-        this.value = value;
-        this.timestamp = timestamp;
+        this.sequence = sequence;
+        this.eventType = eventType;
+        this.createdAt = createdAt;
+        this.finishSignal = finishSignal;
+        this.finishSource = finishSource;
     }
 
-    public static Event shutdownSignal() {
-        Event signal = new Event(
-            "SHUTDOWN",
-            0,
-            EventType.SHUTDOWN,
-            EventPriority.LOW,
-            0.0,
-            System.currentTimeMillis()
-        );
-        signal.shutdownSignal = true;
-        return signal;
+    public static Event sensorEvent(int sensorId, int sequence, int eventType) {
+        String eventId = String.format("S%02d-E%04d", sensorId, sequence);
+        return new Event(eventId, sensorId, sequence, eventType, System.currentTimeMillis(), false, "");
+    }
+
+    public static Event finishSignal(String finishSource) {
+        return new Event("FIN-" + finishSource, 0, 0, 0, System.currentTimeMillis(), true, finishSource);
     }
 
     public String getEventId() {
@@ -45,48 +42,47 @@ public class Event {
         return sensorId;
     }
 
-    public EventType getType() {
-        return type;
+    public int getSequence() {
+        return sequence;
     }
 
-    public EventPriority getPriority() {
-        return priority;
-    }
-
-    public double getValue() {
-        return value;
-    }
-
-    public long getTimestamp() {
-        return timestamp;
-    }
-
-    public void setTargetServerId(int targetServerId) {
-        this.targetServerId = targetServerId;
+    public int getEventType() {
+        return eventType;
     }
 
     public int getTargetServerId() {
-        return targetServerId;
+        return eventType;
     }
 
-    public boolean isShutdownSignal() {
-        return shutdownSignal;
+    public long getCreatedAt() {
+        return createdAt;
+    }
+
+    public boolean isFinishSignal() {
+        return finishSignal;
+    }
+
+    public String getFinishSource() {
+        return finishSource;
+    }
+
+    public String getTypeLabel() {
+        return finishSignal ? "FIN" : "TYPE_" + eventType;
     }
 
     @Override
     public String toString() {
-        if (shutdownSignal) {
-            return "SHUTDOWN";
+        if (finishSignal) {
+            return "FIN(" + finishSource + ")";
         }
 
         return String.format(
-            "%s [sensor=%d, type=%s, priority=%s, value=%.2f, targetServer=%d]",
+            "%s [sensor=%d, seq=%d, type=%s, targetServer=%d]",
             eventId,
             sensorId,
-            type,
-            priority,
-            value,
-            targetServerId
+            sequence,
+            getTypeLabel(),
+            getTargetServerId()
         );
     }
 }

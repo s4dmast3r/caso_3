@@ -1,58 +1,87 @@
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.Random;
 
 public class Broker extends Thread {
-    private final EventQueue inputQueue;
-    private final BlockingMailbox<Alert> alertQueue;
-    private final EventQueue classifierQueue;
-    private final int totalEventsToProcess;
+    private final PassiveMailbox<Event> inputMailbox;
+    private final PassiveMailbox<Alert> alertMailbox;
+    private final LimitedMailbox<Event> classificationMailbox;
+    private final int totalEventsExpected;
+    private final Random random;
+
+    private int processedCount;
+    private int normalCount;
+    private int suspiciousCount;
 
     public Broker(
-        EventQueue inputQueue,
-        BlockingMailbox<Alert> alertQueue,
-        EventQueue classifierQueue,
-        int totalEventsToProcess
+        PassiveMailbox<Event> inputMailbox,
+        PassiveMailbox<Alert> alertMailbox,
+        LimitedMailbox<Event> classificationMailbox,
+        int totalEventsExpected
     ) {
-        super("Broker");
-        this.inputQueue = inputQueue;
-        this.alertQueue = alertQueue;
-        this.classifierQueue = classifierQueue;
-        this.totalEventsToProcess = totalEventsToProcess;
+        super("Broker-Analizador");
+        this.inputMailbox = inputMailbox;
+        this.alertMailbox = alertMailbox;
+        this.classificationMailbox = classificationMailbox;
+        this.totalEventsExpected = totalEventsExpected;
+        this.random = new Random(System.nanoTime());
     }
 
     @Override
     public void run() {
         try {
-            System.out.printf("[%s] Iniciando procesamiento de %d eventos.%n", getName(), totalEventsToProcess);
+            System.out.printf("[%s] Inicio. Debe procesar %d eventos.%n", getName(), totalEventsExpected);
 
-            int anomalousCount = 0;
-            int validCount = 0;
+            for (int i = 0; i < totalEventsExpected; i++) {
+                Event event = inputMailbox.take();
+                int value = random.nextInt(201);
+                processedCount++;
 
-            for (int i = 0; i < totalEventsToProcess; i++) {
-                Event event = inputQueue.take();
-                if (isAnomalous()) {
-                    anomalousCount++;
-                    alertQueue.put(new Alert(event, "Evento detectado como anomalo"));
-                    System.out.printf("[%s] Evento ANOMALO enviado a administrador: %s%n", getName(), event.getEventId());
+                if (value % 8 == 0) {
+                    suspiciousCount++;
+                    alertMailbox.put(new Alert(event, value));
+                    System.out.printf(
+                        "[%s] %s -> sospechoso (valor=%d). Enviado a %s.%n",
+                        getName(),
+                        event.getEventId(),
+                        value,
+                        alertMailbox.getName()
+                    );
                 } else {
-                    validCount++;
-                    classifierQueue.put(event);
-                    System.out.printf("[%s] Evento VALIDO enviado a clasificacion: %s%n", getName(), event.getEventId());
+                    normalCount++;
+                    // Espera semi-activa: el buzon de clasificacion es limitado por tam1.
+                    classificationMailbox.putSemiActive(event);
+                    System.out.printf(
+                        "[%s] %s -> normal (valor=%d). Enviado a %s.%n",
+                        getName(),
+                        event.getEventId(),
+                        value,
+                        classificationMailbox.getName()
+                    );
                 }
             }
 
-            System.out.printf("[%s] Procesados: %d validos, %d anomalos.%n", getName(), validCount, anomalousCount);
-            alertQueue.put(Alert.shutdownSignal());
-            System.out.printf("[%s] Evento de fin enviado a administrador.%n", getName());
+            alertMailbox.put(Alert.finishSignal());
+            System.out.printf(
+                "[%s] Fin. Procesados=%d, normales=%d, sospechosos=%d. Fin enviado al administrador.%n",
+                getName(),
+                processedCount,
+                normalCount,
+                suspiciousCount
+            );
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             System.err.printf("[%s] Interrumpido.%n", getName());
         }
     }
 
-    private boolean isAnomalous() {
-        int randomValue = ThreadLocalRandom.current().nextInt(0, 201);
-        boolean anomaly = randomValue % 8 == 0;
-        System.out.printf("[%s] Valor aleatorio broker=%d, anomalo=%b%n", getName(), randomValue, anomaly);
-        return anomaly;
+    public int getProcessedCount() {
+        return processedCount;
+    }
+
+    public int getNormalCount() {
+        return normalCount;
+    }
+
+    public int getSuspiciousCount() {
+        return suspiciousCount;
     }
 }

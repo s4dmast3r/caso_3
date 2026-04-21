@@ -1,37 +1,37 @@
 public class Alert {
     private final Event event;
-    private final String reason;
+    private final int brokerRandomValue;
     private final long createdAt;
-    private final boolean shutdownSignal;
+    private final boolean finishSignal;
 
-    public Alert(Event event, String reason) {
-        this(event, reason, System.currentTimeMillis(), false);
+    public Alert(Event event, int brokerRandomValue) {
+        this(event, brokerRandomValue, System.currentTimeMillis(), false);
     }
 
-    private Alert(Event event, String reason, long createdAt, boolean shutdownSignal) {
+    private Alert(Event event, int brokerRandomValue, long createdAt, boolean finishSignal) {
         this.event = event;
-        this.reason = reason;
+        this.brokerRandomValue = brokerRandomValue;
         this.createdAt = createdAt;
-        this.shutdownSignal = shutdownSignal;
+        this.finishSignal = finishSignal;
     }
 
-    public static Alert shutdownSignal() {
-        return new Alert(Event.shutdownSignal(), "SHUTDOWN", System.currentTimeMillis(), true);
+    public static Alert finishSignal() {
+        return new Alert(Event.finishSignal("BROKER_A_ADMIN"), -1, System.currentTimeMillis(), true);
     }
 
     public Event getEvent() {
         return event;
     }
 
-    public String getReason() {
-        return reason;
+    public int getBrokerRandomValue() {
+        return brokerRandomValue;
     }
 
     public long getCreatedAt() {
         return createdAt;
     }
 
-    public boolean isShutdownSignal() {
-        return shutdownSignal;
+    public boolean isFinishSignal() {
+        return finishSignal;
     }
 }

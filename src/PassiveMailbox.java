@@ -1,19 +1,17 @@
 import java.util.LinkedList;
 import java.util.Queue;
 
-public class BlockingMailbox<T> {
+public class PassiveMailbox<T> {
     private final Queue<T> queue = new LinkedList<>();
-    private final int capacity;
     private final String name;
 
-    public BlockingMailbox(String name, int capacity) {
+    public PassiveMailbox(String name) {
         this.name = name;
-        this.capacity = capacity;
     }
 
-    public synchronized void put(T item) throws InterruptedException {
-        while (queue.size() >= capacity) {
-            wait();
+    public synchronized void put(T item) {
+        if (item == null) {
+            throw new IllegalArgumentException("No se permiten elementos null en " + name);
         }
 
         queue.add(item);
@@ -21,6 +19,7 @@ public class BlockingMailbox<T> {
     }
 
     public synchronized T take() throws InterruptedException {
+        // Espera pasiva: wait libera el monitor hasta que alguien inserta y notifica.
         while (queue.isEmpty()) {
             wait();
         }
@@ -32,6 +31,10 @@ public class BlockingMailbox<T> {
 
     public synchronized int size() {
         return queue.size();
+    }
+
+    public synchronized boolean isEmpty() {
+        return queue.isEmpty();
     }
 
     public String getName() {
